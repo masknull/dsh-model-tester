@@ -1,0 +1,3 @@
+- insert:
+    - id: model-tester
+      name: dsh-model-tester
