@@ -1,7 +1,7 @@
 {
   "name": "dsh-model-tester",
   "description": "Model availability tester panel in the Models settings page: one-click real streaming test per added model with TPS / first-token / elapsed metrics",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "index.js",
   "exports": {

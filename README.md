@@ -7,6 +7,7 @@ A DeepSeek Harness plugin that adds a **one-click model availability tester** pa
 ## Features
 
 - **Test all at once**: real streaming calls (`llm.stream`) with 3-way concurrency and a 30-second per-model timeout
+- **Test one channel**: per-provider「测试本渠道」button runs only that provider's models
 - **Three metrics on one line**: available / `TPS (tok/s)` / `first token (s)` / `elapsed (s)`
 - **Actionable failures**: failed rows show the reason, error code, and HTTP status
 - **Per-model retest**: each model row carries its own prominent Test / Retest button
@@ -34,7 +35,7 @@ dsh plugin --profile web remove dsh-model-tester
 | Metric | Meaning |
 | --- | --- |
 | Available | The streaming call finished with `stop` / `max-tokens` / `tool-calls` |
-| TPS | `usage.outputTokens ÷ (stream finish time − first token time)`, tok/s, 1 decimal |
+| TPS | `usage.outputTokens ÷ (stream finish time − first token time)`, tok/s, 1 decimal; shows `—` when the decode window is shorter than 50 ms (response arrives in a single chunk — no meaningful rate can be measured) |
 | First token | Time from request start to the first output chunk (text / reasoning delta), seconds, 2 decimals |
 | Elapsed | Total time from request start to stream finish, seconds, 2 decimals |
 
@@ -69,6 +70,7 @@ DeepSeek Harness 插件：在「设置 → 模型」页底部提供**模型可�
 ### 功能
 
 - **一键测试全部**：3 路并发逐个真实调用（`llm.stream`），单模型 30 秒超时
+- **按渠道测试**：每个渠道标题行带「测试本渠道」按钮，只测该渠道下的全部模型
 - **单行三指标**：可用 / `TPS（tok/s）` / `首 token（s）` / `耗时（s）`
 - **失败可诊断**：失败行显示原因、错误码与 HTTP 状态
 - **单模型重测**：每个模型行带独立的显眼「测试 / 重测」按钮
@@ -96,7 +98,7 @@ dsh plugin --profile web remove dsh-model-tester
 | 指标 | 含义 |
 | --- | --- |
 | 可用 | 流式调用以 `stop` / `max-tokens` / `tool-calls` 正常终结 |
-| TPS | `usage.outputTokens ÷（流结束时刻 − 首 token 时刻）`，tok/s，保留 1 位小数 |
+| TPS | `usage.outputTokens ÷（流结束时刻 − 首 token 时刻）`，tok/s，保留 1 位小数；decode 窗口不足 50 毫秒（响应一次性到达）时无法测得有效速率，显示 `—` |
 | 首 token | 从发起请求到收到第一个输出分片（text / reasoning delta）的耗时，秒，2 位小数 |
 | 耗时 | 从发起请求到流结束的总量耗时，秒，2 位小数 |
 

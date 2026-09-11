@@ -24,6 +24,28 @@ const MAX_BODY_BYTES = 65536
 const LIST_ROUTE = '/model-tester/list'
 const TEST_ROUTE = '/model-tester/test'
 
+// 测试模式：quick 为 16 token 连通性探测；throughput 用长输出测真实吞吐
+const MODES = {
+  quick: {
+    maxTokens: 16,
+    prompt: '连通性测试：请只回复 ok',
+  },
+  throughput: {
+    maxTokens: 1024,
+    prompt: '请从 1 一直数到 200，用阿拉伯数字以逗号分隔连续输出，不要解释，不要提前停止。',
+  },
+}
+
+const clampTimeoutMs = (value) => {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : TIMEOUT_MS
+  return Math.min(Math.max(n, 5000), 120000)
+}
+
+const clampRetries = (value) => {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 0
+  return Math.min(Math.max(n, 0), 2)
+}
+
 const errorText = (error) => {
   if (error !== null && typeof error === 'object' && typeof error.message === 'string') return error.message
   return String(error)
@@ -146,7 +168,7 @@ export function apply(ctx) {
     return rows
   }
 
-  const testOne = async (provider, model) => {
+  const attemptOnce = async (provider, model, conf, timeoutMs) => {
     const started = Date.now()
     let outputTokens = null
     let firstTokenAt = null
@@ -154,19 +176,21 @@ export function apply(ctx) {
     let failure = null
     let finishKind = null
 
+    const stream = llm.stream({
+      provider,
+      model,
+      messages: [{
+        id: '00000000-0000-4000-8000-000000000001',
+        role: 'user',
+        content: [{ type: 'text', text: conf.prompt }],
+        source: { kind: 'user' },
+      }],
+      maxTokens: conf.maxTokens,
+    })
+    // iterator 提到 consume 之外：超时中止时需要从外层访问
+    const iterator = stream[Symbol.asyncIterator]()
+
     const consume = async () => {
-      const stream = llm.stream({
-        provider,
-        model,
-        messages: [{
-          id: '00000000-0000-4000-8000-000000000001',
-          role: 'user',
-          content: [{ type: 'text', text: '连通性测试：请只回复 ok' }],
-          source: { kind: 'user' },
-        }],
-        maxTokens: 16,
-      })
-      const iterator = stream[Symbol.asyncIterator]()
       try {
         for (;;) {
           const step = await iterator.next()
@@ -188,8 +212,10 @@ export function apply(ctx) {
                 code: f !== null && typeof f.code === 'string' ? f.code : 'UNKNOWN',
                 status: f !== null && typeof f.status === 'number' ? f.status : null,
               }
+              break
             }
-            break
+            // 正常结束不在此处 break：usage 帧可能排在 finish 之后，提前退出会把
+            // outputTokens 丢成 null（TPS 误显示 '—'）；让循环等流自然 done
           }
         }
       } finally {
@@ -203,7 +229,7 @@ export function apply(ctx) {
     try {
       outcome = await Promise.race([
         consume().then(() => ({ timedOut: false, thrown: null })).catch((error) => ({ timedOut: false, thrown: error })),
-        ctx.timeout(TIMEOUT_MS).then(() => ({ timedOut: true, thrown: null })),
+        ctx.timeout(timeoutMs).then(() => ({ timedOut: true, thrown: null })),
       ])
     } catch (error) {
       outcome = { timedOut: false, thrown: error }
@@ -211,7 +237,11 @@ export function apply(ctx) {
 
     const latencyMs = Date.now() - started
     if (outcome !== null && typeof outcome === 'object' && outcome.timedOut === true) {
-      return { ok: false, latencyMs, failure: { message: '测试超时：' + (TIMEOUT_MS / 1000) + ' 秒内无响应', code: 'TIMEOUT', status: null } }
+      // 超时后尽力中止底层流，避免该请求在后台继续跑完整个生成（资源泄漏）
+      if (typeof iterator.return === 'function') {
+        Promise.resolve().then(() => iterator.return()).catch(() => {})
+      }
+      return { ok: false, latencyMs, failure: { message: '测试超时：' + (timeoutMs / 1000) + ' 秒内无响应', code: 'TIMEOUT', status: null } }
     }
     const thrown = outcome !== null && typeof outcome === 'object' ? outcome.thrown : null
     if (thrown !== null && thrown !== undefined) {
@@ -228,10 +258,28 @@ export function apply(ctx) {
     let tps = null
     if (firstTokenAt !== null && finishAt !== null && typeof outputTokens === 'number' && outputTokens >= 0) {
       const decodeMs = finishAt - firstTokenAt
-      if (decodeMs > 0) tps = Math.round((outputTokens / (decodeMs / 1000)) * 10) / 10
-      else tps = outputTokens
+      // decode 窗口过短（响应一次性到达、无增量流）时无法测得有效速率：
+      // 原实现会退化成把 outputTokens 计数直接当 tok/s 显示（如 8000.0），此处改为显示 '—'
+      if (decodeMs >= 50) tps = Math.round((outputTokens / (decodeMs / 1000)) * 10) / 10
     }
-    return { ok: true, tps, ttftMs, elapsedMs, outputTokens }
+    return { ok: true, tps, ttftMs, elapsedMs, outputTokens, maxTokens: conf.maxTokens }
+  }
+
+  // 失败自动重试：偶发超时/抖动不直接判死刑；每次尝试独立计时、独立超时
+  const testOne = async (provider, model, opts = {}) => {
+    const isThroughput = opts !== null && typeof opts === 'object' && opts.mode === 'throughput'
+    const conf = isThroughput ? MODES.throughput : MODES.quick
+    const timeoutMs = clampTimeoutMs(opts !== null && typeof opts === 'object' ? opts.timeoutMs : undefined)
+    const maxAttempts = clampRetries(opts !== null && typeof opts === 'object' ? opts.retries : undefined) + 1
+    let attempts = 0
+    let last = null
+    for (;;) {
+      attempts += 1
+      last = await attemptOnce(provider, model, conf, timeoutMs)
+      if (last !== null && typeof last === 'object' && last.ok === true) break
+      if (attempts >= maxAttempts) break
+    }
+    return { ...(last || {}), mode: isThroughput ? 'throughput' : 'quick', attempts }
   }
 
   ctx.effect(() => ctx.webServer.register({
@@ -287,7 +335,7 @@ export function apply(ctx) {
         return
       }
       try {
-        sendJson(res, 200, await testOne(provider, model))
+        sendJson(res, 200, await testOne(provider, model, args !== null && typeof args === 'object' ? args : {}))
       } catch (error) {
         sendJson(res, 500, { ok: false, latencyMs: 0, failure: { message: errorText(error), code: 'ROUTE_ERROR', status: null } })
       }
