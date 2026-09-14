@@ -39,7 +39,7 @@ dsh plugin --profile web remove dsh-model-tester
 | First token | Time from request start to the first output chunk (text / reasoning delta), seconds, 2 decimals |
 | Elapsed | Total time from request start to stream finish, seconds, 2 decimals |
 
-The test request is fixed at `maxTokens: 16` with the prompt "连通性测试：请只回复 ok" ("connectivity test: reply ok only"). TPS relies on provider usage reporting; it shows `—` when the provider does not report usage.
+The test request deliberately sends **no** `maxTokens` — DSH omits the field entirely when it is `undefined`, so the upstream provider applies its own default output budget. Passing any value there is forwarded as `max_output_tokens`, where a small budget competes with a reasoning model's chain-of-thought tokens and makes the provider truncate early with `response incomplete: max_output_tokens` (an intermittent, model-dependent false failure). TPS relies on provider usage reporting; it shows `—` when the provider does not report usage.
 
 ## Architecture
 
@@ -102,7 +102,7 @@ dsh plugin --profile web remove dsh-model-tester
 | 首 token | 从发起请求到收到第一个输出分片（text / reasoning delta）的耗时，秒，2 位小数 |
 | 耗时 | 从发起请求到流结束的总量耗时，秒，2 位小数 |
 
-测试请求固定为 `maxTokens: 16`、提示词「连通性测试：请只回复 ok」。TPS 依赖提供方返回 usage；未返回时显示 `—`。
+测试请求**刻意不传** `maxTokens`：DSH 在该值为 `undefined` 时会完全省略此字段，由上游提供方使用自身默认输出额度。任何传入值都会被转成 `max_output_tokens` 下发，而小额度会与推理模型的思维链 token 争抢同一份额度，导致上游以 `response incomplete: max_output_tokens` 提前截断（偶发、随模型而异的假失败）。TPS 依赖提供方返回 usage；未返回时显示 `—`。
 
 ### 架构
 

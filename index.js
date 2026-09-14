@@ -24,14 +24,15 @@ const MAX_BODY_BYTES = 65536
 const LIST_ROUTE = '/model-tester/list'
 const TEST_ROUTE = '/model-tester/test'
 
-// 测试模式：quick 为 16 token 连通性探测；throughput 用长输出测真实吞吐
+// 测试模式：quick 为连通性探测；throughput 用长输出测真实吞吐。
+// 两者都刻意不传 maxTokens：请求侧的输出上限会与推理模型的思维链开销争抢同一份额度，
+// 导致上游以 `response incomplete: max_output_tokens` 提前截断（偶发、且随模型而异的假失败）。
+// 省略该参数后由服务端使用自身默认额度，探活结果才反映真实可用性。
 const MODES = {
   quick: {
-    maxTokens: 16,
     prompt: '连通性测试：请只回复 ok',
   },
   throughput: {
-    maxTokens: 1024,
     prompt: '请从 1 一直数到 200，用阿拉伯数字以逗号分隔连续输出，不要解释，不要提前停止。',
   },
 }
@@ -185,7 +186,9 @@ export function apply(ctx) {
         content: [{ type: 'text', text: conf.prompt }],
         source: { kind: 'user' },
       }],
-      maxTokens: conf.maxTokens,
+      // 刻意不传 maxTokens：DSH 在 undefined 时完全省略该键（adapter.ts 的展开守卫），
+      // 上游因此使用自身默认额度。传任何值都会经 pi-ai 的 Math.max(v, 16) 下发 max_output_tokens，
+      // 小额度与推理模型的思维链开销争抢同一份额度，导致 response incomplete (max_output_tokens)。
     })
     // iterator 提到 consume 之外：超时中止时需要从外层访问
     const iterator = stream[Symbol.asyncIterator]()
@@ -262,7 +265,8 @@ export function apply(ctx) {
       // 原实现会退化成把 outputTokens 计数直接当 tok/s 显示（如 8000.0），此处改为显示 '—'
       if (decodeMs >= 50) tps = Math.round((outputTokens / (decodeMs / 1000)) * 10) / 10
     }
-    return { ok: true, tps, ttftMs, elapsedMs, outputTokens, maxTokens: conf.maxTokens }
+    // 不再回传 maxTokens：测试请求刻意不下发该参数，上游额度由服务端决定
+    return { ok: true, tps, ttftMs, elapsedMs, outputTokens }
   }
 
   // 失败自动重试：偶发超时/抖动不直接判死刑；每次尝试独立计时、独立超时
