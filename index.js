@@ -79,11 +79,50 @@ export function apply(ctx) {
   const settings = ctx.settings
   const connection = ctx.connection
 
+  /** One request-scoped `describe()` snapshot; undefined until first read. */
+  let describeSnapshot
+
+  /**
+   * Read one namespace's configuration, on either host line.
+   *
+   * 0.1.5 keeps the old `settings.get(ns)` entry, which is exactly "this
+   * namespace's user layer". DSH 0.1.7-alpha.1 removed it (the host's settings
+   * service no longer exposes the old read interface, so a caller falls silent
+   * to empty — a custom model channel's models then read as none). The
+   * replacement is `describe()`, which returns one descriptor per profile
+   * entry keyed by `entry.options.id`; pi-ai and deepseek register their
+   * provider-directory rows with that same id as `settingsNs`, so the lookup
+   * is by name.
+   *
+   * `user` is read rather than `value` on purpose: `value` is the live value
+   * including schema defaults, which would mark every never-configured
+   * provider as configured, while `settings.get` used to answer with the
+   * user's own layer only.
+   */
   const profileAt = (settingsNs, settingsPath) => {
     if (typeof settingsNs !== 'string' || settingsNs.length === 0) return undefined
     let profile
     try {
-      profile = settings.get(settingsNs)
+      if (typeof settings.get === 'function') {
+        profile = settings.get(settingsNs)
+      } else if (typeof settings.describe === 'function') {
+        if (describeSnapshot === undefined) {
+          let rows = null
+          try {
+            const raw = settings.describe()
+            if (Array.isArray(raw)) rows = raw
+          } catch (error) {
+            rows = null
+          }
+          describeSnapshot = rows
+        }
+        const row = describeSnapshot === null
+          ? undefined
+          : describeSnapshot.find((entry) => entry !== null && typeof entry === 'object' && entry.ns === settingsNs)
+        profile = row === undefined
+          ? undefined
+          : row.user !== undefined && row.user !== null ? row.user : row.value
+      }
     } catch (error) {
       return undefined
     }
@@ -94,6 +133,9 @@ export function apply(ctx) {
     }
     return profile !== null && typeof profile === 'object' ? profile : undefined
   }
+
+  /** Drop the request-scoped snapshot so a later request sees fresh settings. */
+  const resetDescribeSnapshot = () => { describeSnapshot = undefined }
 
   const normalizeModelList = (value) => {
     if (!Array.isArray(value)) return []
@@ -122,6 +164,9 @@ export function apply(ctx) {
   }
 
   const listRows = async () => {
+    // A fresh snapshot per request: rows must reflect the settings as they are
+    // now, not as they were during an earlier panel refresh.
+    resetDescribeSnapshot()
     const registeredRaw = llm.listProviders()
     const registered = Array.isArray(registeredRaw) ? registeredRaw : []
     const activeSet = new Set()

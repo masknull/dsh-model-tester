@@ -1,7 +1,7 @@
 {
   "name": "dsh-model-tester",
   "description": "Model availability tester panel in the Models settings page: one-click real streaming test per added model with TPS / first-token / elapsed metrics",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -13,6 +13,9 @@
     "client.js",
     "cordis.patch.yml"
   ],
+  "engines": {
+    "dsh": ">=0.1.5-rc.2"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
