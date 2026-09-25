@@ -11,7 +11,8 @@
   "files": [
     "index.js",
     "client.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "assets"
   ],
   "engines": {
     "dsh": ">=0.1.5-rc.2"
@@ -24,5 +25,6 @@
       "platform": "web"
     }
   },
-  "license": "MIT"
+  "license": "MIT",
+  "icon": "./assets/icon.svg"
 }
