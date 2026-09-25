@@ -6,13 +6,16 @@
   "main": "index.js",
   "exports": {
     ".": "./index.js",
-    "./client": "./client.js"
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
   },
   "files": [
     "index.js",
     "client.js",
     "cordis.patch.yml",
-    "assets"
+    "assets",
+    "locale/*.json"
   ],
   "engines": {
     "dsh": ">=0.1.5-rc.2"

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Model Tester",
+    "description": "One-click availability testing for every added model from the Models settings page, reporting availability, TPS, first-token latency, and elapsed time."
+  }
+}
